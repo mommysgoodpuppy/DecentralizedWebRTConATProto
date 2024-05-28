@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebRTC via Puppeteer</title>
+</head>
+<body>
+    <script>
+        async function setupWebRTC(peerConnection, signalingChannel) {
+            signalingChannel.onmessage = async (event) => {
+                const data = JSON.parse(event.data);
+
+                if (data.sdp) {
+                    await peerConnection.setRemoteDescription(new RTCSessionDescription(data.sdp));
+                    if (data.sdp.type === 'offer') {
+                        const answer = await peerConnection.createAnswer();
+                        await peerConnection.setLocalDescription(answer);
+                        signalingChannel.send(JSON.stringify({ sdp: answer }));
+                    }
+                } else if (data.candidate) {
+                    await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
+                } else if (data.type === 'data') {
+                    const channel = peerConnection.createDataChannel('dataChannel');
+                    channel.onopen = () => channel.send(data.data);
+                }
+            };
+
+            peerConnection.onicecandidate = (event) => {
+                if (event.candidate) {
+                    signalingChannel.send(JSON.stringify({ candidate: event.candidate }));
+                }
+            };
+
+            const offer = await peerConnection.createOffer();
+            await peerConnection.setLocalDescription(offer);
+            signalingChannel.send(JSON.stringify({ sdp: offer }));
+        }
+
+        const signalingChannel = new WebSocket('ws://localhost:8000');
+
+        signalingChannel.onopen = () => {
+            console.log('WebSocket connection established');
+        };
+
+        const peerConnection = new RTCPeerConnection({
+            iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+        });
+
+        setupWebRTC(peerConnection, signalingChannel);
+    </script>
+</body>
+</html>
